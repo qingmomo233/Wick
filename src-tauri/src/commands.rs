@@ -26,10 +26,10 @@ pub fn remove_device(app: tauri::AppHandle, id: String) {
     crate::collector::remove_device(&app, &id);
 }
 
-/// 手动拖拽排序（id 列表，顶在前）。
+/// 手动拖拽排序（id 列表，顶在前）；返回排序后的列表供前端即时采用。
 #[tauri::command]
-pub fn reorder_devices(app: tauri::AppHandle, order: Vec<String>) {
-    crate::collector::reorder_devices(&app, &order);
+pub fn reorder_devices(app: tauri::AppHandle, order: Vec<String>) -> Vec<DeviceBattery> {
+    crate::collector::reorder_devices(&app, &order)
 }
 
 #[tauri::command]

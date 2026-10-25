@@ -203,7 +203,7 @@ body {
   border: 1px solid var(--stroke);
   background: var(--glass);
   backdrop-filter: blur(14px);
-  transition: background 0.2s, transform 0.2s;
+  transition: background 0.2s, transform 0.2s, box-shadow 0.2s, border-color 0.2s;
   min-width: 0;
 }
 
@@ -240,17 +240,49 @@ body {
   color: var(--text-3);
 }
 
-/* 拖拽排序 */
+/* 拖拽排序：长按浮空，原位留空槽（visibility 保住网格几何尺寸） */
 .card-wrap {
   position: relative;
   touch-action: none;
 }
 
-.card-dragging {
-  opacity: 0.55;
-  transform: scale(1.02);
-  cursor: grabbing;
-  z-index: 5;
+/* 长按等待：轻微下压，暗示可拖 */
+.card-pressing .card {
+  transform: scale(0.97);
+}
+
+/* 拖拽中：原位置的卡隐藏成空槽 */
+.card-dragging .card {
+  visibility: hidden;
+}
+
+/* 浮空卡层：跟随指针（transform 由 JS 直接驱动），不拦截指针事件 */
+.drag-float {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.drag-float .card {
+  transform: scale(1.05);
+  background: var(--glass-strong);
+  border-color: rgba(148, 163, 184, 0.45);
+  box-shadow:
+    0 18px 36px rgba(0, 0, 0, 0.38),
+    0 6px 12px rgba(0, 0, 0, 0.22);
+}
+
+/* 松手落位：浮卡滑向占位槽 */
+.drag-float.dropping {
+  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.drag-float.dropping .card {
+  transform: scale(1);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
 }
 
 /* 标题栏按钮激活态（置顶） */

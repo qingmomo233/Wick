@@ -16,10 +16,10 @@ export async function removeDevice(id: string): Promise<void> {
   await invoke('remove_device', { id });
 }
 
-/** 手动排序（id 列表，顶在前）。 */
-export async function reorderDevices(order: string[]): Promise<void> {
+/** 手动排序（id 列表，顶在前）；返回排序后的设备列表（松手时立即采用，避免回跳闪烁）。 */
+export async function reorderDevices(order: string[]): Promise<DeviceBattery[]> {
   const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('reorder_devices', { order });
+  return invoke<DeviceBattery[]>('reorder_devices', { order });
 }
 
 /** 窗口置顶开关。 */

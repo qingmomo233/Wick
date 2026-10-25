@@ -131,7 +131,10 @@ pub fn probe(interfaces: &[HidDev]) -> Result<Option<DeviceBattery>, ProbeError>
     let (name, kind, tid) = match known(pid) {
         Some((n, k, t)) => (n.to_string(), k.to_string(), Some(t)),
         None => {
-            // 已知有线 PID（如 052E BlackShark 2020 充电线）直接跳过
+            // 已知有线 PID 直接跳过（052E = BlackShark 2020 充电线，电量从接收器 0528 读）
+            if pid == 0x052E {
+                return Ok(None);
+            }
             let product = format!(
                 "{} {}",
                 interfaces[0].product,

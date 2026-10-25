@@ -37,18 +37,18 @@ pub fn probe(interfaces: &[HidDev]) -> Result<Option<DeviceBattery>, ProbeError>
         0x22A1 | 0x2202 | 0x227E | 0x2206 | 0x2258 | 0x229E | 0x22AD | 0x22A4 | 0x22A5
         | 0x223A | 0x22A9 | 0x227A | 0x220A | 0x22A7 | 0x2298 => {
             nova_probe(&api, interfaces, parse_nova7(pid_discrete(pid)))
-                .map(|r| (nova_name(pid).unwrap(), "headset", r))
+                .map(|r| (nova_name(pid).unwrap_or("SteelSeries Arctis"), "headset", r))
         }
         0x2232 | 0x2253 | 0x2269 | 0x226D => {
             nova_probe(&api, interfaces, parse_nova5)
-                .map(|r| (nova_name(pid).unwrap(), "headset", r))
+                .map(|r| (nova_name(pid).unwrap_or("SteelSeries Arctis"), "headset", r))
         }
         0x220E | 0x2212 | 0x2216 | 0x2236 => {
             nova_probe(&api, interfaces, parse_7plus)
-                .map(|r| (nova_name(pid).unwrap(), "headset", r))
+                .map(|r| (nova_name(pid).unwrap_or("SteelSeries Arctis"), "headset", r))
         }
         0x230A | 0x2317 => nova_probe(&api, interfaces, parse_gamebuds)
-            .map(|r| (nova_name(pid).unwrap(), "headset", r)),
+            .map(|r| (nova_name(pid).unwrap_or("SteelSeries Arctis"), "headset", r)),
         // ---- 无线鼠标（0xAA / 0xD2 交换）----
         0x1830 | 0x1872 => mouse_probe(&api, interfaces, false)
             .map(|r| ("SteelSeries Rival 3 Wireless", "mouse", r)),

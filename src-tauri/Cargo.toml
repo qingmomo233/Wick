@@ -1,6 +1,6 @@
 [package]
 name = "wick"
-version = "0.3.1"
+version = "0.3.5"
 description = "Wick — 跨平台无线设备电量监控（蓝牙 / 星闪 / 2.4G 接收器）"
 authors = ["Wick"]
 edition = "2021"

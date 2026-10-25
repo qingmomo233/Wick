@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppSettings, DeviceBattery, FilterKey } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import {
@@ -46,8 +46,78 @@ export default function App() {
   // 拖拽排序状态
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  /** 长按等待期的按压反馈（轻微下压） */
+  const [pressingId, setPressingId] = useState<string | null>(null);
   const dragOrderRef = useRef<string[] | null>(null);
-  const drag = useRef<{ id: string; pointerId: number; timer: number; active: boolean; startY: number; el: HTMLElement | null } | null>(null);
+  const drag = useRef<{
+    id: string;
+    pointerId: number;
+    timer: number;
+    active: boolean;
+    startY: number;
+    el: HTMLElement | null;
+    /** 抓取点相对卡片左上角的偏移（浮卡跟随指针用） */
+    offsetX: number;
+    offsetY: number;
+    /** 浮卡初始尺寸与位置（拾起时锁定） */
+    width: number;
+    height: number;
+    homeX: number;
+    homeY: number;
+    lastX: number;
+    lastY: number;
+  } | null>(null);
+  /** 浮空卡层（跟随指针，直接改 transform 不走 React 渲染） */
+  const floatRef = useRef<HTMLDivElement>(null);
+
+  // ---------- 换位 FLIP 动画 ----------
+  // 顺序变化前记录各卡片位置，DOM 更新后把卡片从旧位置平滑滑到新位置
+  // （时序与缓动参考 dnd-kit sortable：220ms / cubic-bezier(0.2, 0, 0, 1)）
+  const flipRects = useRef<Map<string, DOMRect>>(new Map());
+  const flipAnims = useRef<Map<string, Animation>>(new Map());
+  /** FLIP 动画播放中的卡片 id：视觉位置未落定，不作为换位目标，
+   *  否则换位判定会反复触发"换过去又换回来"的震荡 */
+  const flipAnimating = useRef<Set<string>>(new Set());
+  const reduceMotion = useMemo(
+    () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
+    [],
+  );
+
+  const captureFlip = () => {
+    if (reduceMotion) return;
+    flipRects.current.clear();
+    document.querySelectorAll<HTMLElement>('[data-card-id]').forEach((el) => {
+      if (el.dataset.cardId) flipRects.current.set(el.dataset.cardId, el.getBoundingClientRect());
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (flipRects.current.size === 0 || reduceMotion) return;
+    const rects = flipRects.current;
+    flipRects.current = new Map();
+    document.querySelectorAll<HTMLElement>('[data-card-id]').forEach((el) => {
+      const id = el.dataset.cardId;
+      if (!id || id === draggingId) return; // 占位卡不可见，无需动画（还要供落位取准确槽位）
+      const prev = rects.get(id);
+      if (!prev) return;
+      const next = el.getBoundingClientRect();
+      const dx = prev.left - next.left;
+      const dy = prev.top - next.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      flipAnims.current.get(id)?.cancel();
+      const anim = el.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px)` },
+          { transform: 'translate(0px, 0px)' },
+        ],
+        { duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+      );
+      flipAnims.current.set(id, anim);
+      flipAnimating.current.add(id);
+      anim.onfinish = () => flipAnimating.current.delete(id);
+      anim.oncancel = () => flipAnimating.current.delete(id);
+    });
+  }, [dragOrder, devices, draggingId]);
 
   useEffect(() => {
     let disposed = false;
@@ -168,14 +238,49 @@ export default function App() {
 
   // ---------- 长按拖拽排序 ----------
 
+  // 浮卡层挂载：按拾起时锁定的尺寸/位置初始化
+  useLayoutEffect(() => {
+    const d = drag.current;
+    const fl = floatRef.current;
+    if (!draggingId || !d || !fl) return;
+    fl.style.width = `${d.width}px`;
+    fl.style.transform = `translate(${d.homeX}px, ${d.homeY}px)`;
+  }, [draggingId]);
+
   const startDrag = (e: React.PointerEvent, id: string, el: HTMLElement) => {
     if (e.button !== 0 || drag.current) return;
-    drag.current = { id, pointerId: e.pointerId, timer: 0, active: false, startY: e.clientY, el };
+    // 移除按钮上不启动拖拽（避免按压反馈闪烁 + 误触发长按）
+    if ((e.target as HTMLElement).closest('.card-remove')) return;
+    drag.current = {
+      id,
+      pointerId: e.pointerId,
+      timer: 0,
+      active: false,
+      startY: e.clientY,
+      el,
+      offsetX: 0,
+      offsetY: 0,
+      width: 0,
+      height: 0,
+      homeX: 0,
+      homeY: 0,
+      lastX: e.clientX,
+      lastY: e.clientY,
+    };
+    setPressingId(id);
     drag.current.timer = window.setTimeout(() => {
       const d = drag.current;
-      if (!d) return;
+      if (!d?.el) return;
+      const r = d.el.getBoundingClientRect();
       d.active = true;
-      d.el?.setPointerCapture(d.pointerId);
+      d.offsetX = d.lastX - r.left;
+      d.offsetY = d.lastY - r.top;
+      d.width = r.width;
+      d.height = r.height;
+      d.homeX = r.left;
+      d.homeY = r.top;
+      setPressingId(null);
+      d.el.setPointerCapture(d.pointerId);
       setDraggingId(id);
       const order = devices.map((x) => x.id);
       dragOrderRef.current = order;
@@ -191,38 +296,91 @@ export default function App() {
       if (Math.abs(e.clientY - d.startY) > 8) {
         window.clearTimeout(d.timer);
         drag.current = null;
+        setPressingId(null);
       }
       return;
     }
-    const target = document
-      .elementFromPoint(e.clientX, e.clientY)
-      ?.closest('[data-card-id]') as HTMLElement | null;
-    const targetId = target?.dataset.cardId;
-    if (!targetId || targetId === d.id) return;
-    setDragOrder((prev) => {
-      if (!prev) return prev;
-      const from = prev.indexOf(d.id);
-      const to = prev.indexOf(targetId);
-      if (from < 0 || to < 0) return prev;
-      const next = [...prev];
-      next.splice(to, 0, ...next.splice(from, 1));
-      dragOrderRef.current = next;
-      return next;
-    });
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
+    // 浮卡跟随指针（直接写 transform，避免整列表重渲染）
+    if (floatRef.current) {
+      floatRef.current.style.transform = `translate(${e.clientX - d.offsetX}px, ${
+        e.clientY - d.offsetY
+      }px)`;
+    }
+    // 占位判定：浮卡中心落在哪张卡上，空槽就挪到哪里
+    const fx = e.clientX - d.offsetX + d.width / 2;
+    const fy = e.clientY - d.offsetY + d.height / 2;
+    let hit: { el: HTMLElement; id: string } | null = null;
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-card-id]'))) {
+      const cid = el.dataset.cardId;
+      if (!cid || cid === d.id || flipAnimating.current.has(cid)) continue; // 动画中不参与判定
+      const r = el.getBoundingClientRect();
+      if (fx >= r.left && fx <= r.right && fy >= r.top && fy <= r.bottom) {
+        hit = { el, id: cid };
+        break;
+      }
+    }
+    const prev = dragOrderRef.current;
+    if (!hit || !prev) return;
+    const r = hit.el.getBoundingClientRect();
+    // 前/后判定：同一行比 x，跨行比 y（行主序网格）
+    const before =
+      Math.abs(fy - (r.top + r.height / 2)) <= r.height / 2
+        ? fx < r.left + r.width / 2
+        : fy < r.top + r.height / 2;
+    const others = prev.filter((x) => x !== d.id);
+    let k = others.indexOf(hit.id);
+    if (!before) k += 1;
+    const next = [...others.slice(0, k), d.id, ...others.slice(k)];
+    if (next.join('\n') === prev.join('\n')) return; // 槽位未变
+    captureFlip(); // DOM 更新前记录旧位置，渲染后播放让位滑动
+    dragOrderRef.current = next;
+    setDragOrder(next);
   };
 
   const endDrag = () => {
     const d = drag.current;
     drag.current = null;
+    setPressingId(null);
     if (!d) return;
     window.clearTimeout(d.timer);
     if (!d.active) return;
     d.el?.releasePointerCapture(d.pointerId);
-    setDraggingId(null);
-    const order = dragOrderRef.current;
-    dragOrderRef.current = null;
-    setDragOrder(null);
-    if (order) void reorderDevices(order).catch(() => undefined);
+    const finish = () => {
+      setDraggingId(null);
+      const order = dragOrderRef.current;
+      dragOrderRef.current = null;
+      if (!order) {
+        setDragOrder(null);
+        return;
+      }
+      // 记录位置 → 提交顺序并立即采用返回值（避免回跳闪烁）
+      captureFlip();
+      void (async () => {
+        try {
+          const updated = await reorderDevices(order);
+          setDevices(updated);
+        } catch {
+          /* 提交失败：回退显示当前列表顺序 */
+        }
+        setDragOrder(null);
+      })();
+    };
+    // 落位动画：浮卡滑向自己的占位槽，到位后再交回真实卡片
+    const fl = floatRef.current;
+    let slot: HTMLElement | null = null;
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-card-id]'))) {
+      if (el.dataset.cardId === d.id) slot = el;
+    }
+    if (fl && slot) {
+      const r = slot.getBoundingClientRect();
+      fl.classList.add('dropping');
+      fl.style.transform = `translate(${r.left}px, ${r.top}px)`;
+      window.setTimeout(finish, 160);
+    } else {
+      finish();
+    }
   };
 
   // ---------- 置顶 ----------
@@ -313,7 +471,9 @@ export default function App() {
               <div
                 key={d.id}
                 data-card-id={d.id}
-                className={`card-wrap ${draggingId === d.id ? 'card-dragging' : ''}`}
+                className={`card-wrap ${draggingId === d.id ? 'card-dragging' : ''} ${
+                  pressingId === d.id ? 'card-pressing' : ''
+                }`}
                 onPointerDown={(e) => startDrag(e, d.id, e.currentTarget)}
                 onPointerMove={onDragMove}
                 onPointerUp={endDrag}
@@ -346,6 +506,13 @@ export default function App() {
           onPreview={setSettings}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {/* 拖拽中的浮空卡：跟随指针，原位置由隐藏的占位卡保留空槽 */}
+      {draggingId && (
+        <div ref={floatRef} className="drag-float">
+          <DeviceCard device={devices.find((x) => x.id === draggingId)!} onRemove={onRemove} />
+        </div>
       )}
 
       <Toasts items={toasts} />

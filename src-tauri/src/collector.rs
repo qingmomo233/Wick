@@ -294,12 +294,13 @@ fn merge_with_known(
     shown
 }
 
-/// 手动拖拽排序：覆盖 order 列表并立即推送。
-pub fn reorder_devices(app: &AppHandle, order: &[String]) {
+/// 手动拖拽排序：覆盖 order 列表并立即推送，返回排序后的列表
+/// （前端松手时直接采用，避免先回跳旧顺序再等推送的闪烁）。
+pub fn reorder_devices(app: &AppHandle, order: &[String]) -> Vec<DeviceBattery> {
     let state = app.state::<AppState>();
     let devices = {
         let Ok(mut known) = state.known.lock() else {
-            return;
+            return Vec::new();
         };
         let ids: Vec<String> = known.devices.iter().map(|d| d.id.clone()).collect();
         let mut new_order: Vec<String> = order.iter().filter(|id| ids.contains(id)).cloned().collect();
@@ -320,6 +321,7 @@ pub fn reorder_devices(app: &AppHandle, order: &[String]) {
         }
     };
     let _ = app.emit("devices-updated", &devices);
+    devices
 }
 
 /// 手动移除设备：从库中删除、加入隐藏名单、立即推送新列表。
