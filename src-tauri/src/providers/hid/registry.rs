@@ -13,8 +13,16 @@ pub enum Plan {
     Logitech,
     /// ATK / VXE / VGN 家族（含 NearLink 星闪接收器，VID 0x373B）
     AtkFamily,
-    /// 已知品牌的接收器，但尚未实现其私有协议 → 如实显示「协议未适配」
-    KnownVendor(&'static str),
+    /// Razer（90 字节 feature report 主协议 + BlackShark/Barracuda PA 变体）
+    Razer,
+    /// SteelSeries（Arctis 耳机 / Nova 系列 / Aerox·Rival 鼠标）
+    SteelSeries,
+    /// Corsair（Void / Void v2 / bragi(SlipStream)）
+    Corsair,
+    /// HyperX（Cloud 系列耳机；HP VID 0x03F0 与 Kingston VID 0x0951）
+    HyperX,
+    /// 8BitDo 手柄（D-input 模式，只读监听增强输入报告）
+    EightBitDo,
     /// 未登记 VID
     Unknown,
 }
@@ -30,12 +38,17 @@ pub fn lookup(vid: u16, _pid: u16) -> Plan {
         // Compx 另一批次接收器 VID（真机实测 3554:fa09 "2.4G Wireless Receiver"，
         // 厂商 usage page 0xFF02/0xFF04 与 0x373B 家族一致）
         0x3554 => Plan::AtkFamily,
-        // 以下品牌已有公开的电量协议实现（可参考 HaloBattery 等项目），暂未接入
-        0x1532 => Plan::KnownVendor("Razer"),
-        0x1038 => Plan::KnownVendor("SteelSeries"),
-        0x1B1C => Plan::KnownVendor("Corsair"),
-        0x2DC8 => Plan::KnownVendor("8BitDo"),
-        0x03F0 => Plan::KnownVendor("HP/HyperX"),
+        // Razer：HyperSpeed 接收器 / 无线键鼠 / BlackShark 耳机（各 PID 表见 razer.rs）
+        0x1532 => Plan::Razer,
+        // SteelSeries：Arctis / Nova 耳机接收器、Aerox / Rival 无线鼠标
+        0x1038 => Plan::SteelSeries,
+        // Corsair：Void 系列耳机、HS80 / Virtuoso Max、Dark Core（bragi 协议）
+        0x1B1C => Plan::Corsair,
+        // HyperX（HP VID）：Cloud II / III / Alpha 无线耳机；0951 为 Kingston 批次（Cloud Flight）
+        0x03F0 => Plan::HyperX,
+        0x0951 => Plan::HyperX,
+        // 8BitDo：D-input 模式手柄（Pro 2 / Pro 3 / SN30 / SF30），只读监听
+        0x2DC8 => Plan::EightBitDo,
         _ => Plan::Unknown,
     }
 }

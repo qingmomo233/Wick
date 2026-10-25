@@ -1,13 +1,19 @@
 //! 厂商 HID 协议层（2.4G / 星闪接收器 / 蓝牙直连 HID 设备）。
-//! 调度：VID/PID 注册表命中 → 专用解析器（罗技 / ATK）；未命中 → 通用只读
-//! 启发式（绝不写入未知设备）；读不出电量 → 不显示（只监控无线设备）。
+//! 调度：VID/PID 注册表命中 → 专用解析器（罗技 / ATK / Razer / SteelSeries /
+//! Corsair / HyperX / 8BitDo）；未命中 → 通用只读启发式（绝不写入未知设备）；
+//! 读不出电量 → 不显示（只监控无线设备）。
 //! 并发：hidapi 为阻塞 IO，一律 spawn_blocking + tokio timeout；
 //! 同一物理设备组内串行探测，避免并发读写接收器导致应答串扰。
 
 pub mod atk_vxe;
+pub mod corsair;
+pub mod eightbitdo;
 pub mod generic;
 pub mod hidpp_logi;
+pub mod hyperx;
+pub mod razer;
 pub mod registry;
+pub mod steelseries;
 
 use std::time::Duration;
 
@@ -21,6 +27,14 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const RECEIVER_TIMEOUT: Duration = Duration::from_secs(8);
 /// ATK 家族：被动监听 + 双轮主动查询 ×2 接口，整体放宽到 5 秒。
 const ATK_TIMEOUT: Duration = Duration::from_secs(5);
+/// Razer：已知 PID 单 tid 即命中；未知 PID 逐 tid 扫描（短窗口）。
+const RAZER_TIMEOUT: Duration = Duration::from_secs(6);
+/// SteelSeries：经典 Arctis 最多 3 集合 × 2 次问答。
+const STEELSERIES_TIMEOUT: Duration = Duration::from_secs(7);
+/// Corsair：bragi 需先跑会话（Virtuoso SE），首问 5s + 复问 2.5s + 充电 1s。
+const CORSAIR_TIMEOUT: Duration = Duration::from_secs(12);
+/// HyperX：Cloud III S 最多 2 集合 × 2s 读窗，其余型号几条 1s 命令。
+const HYPERX_TIMEOUT: Duration = Duration::from_secs(6);
 /// 设备枚举超时。
 const ENUM_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -54,6 +68,8 @@ pub struct HidDev {
     pub usage_page: u16,
     pub usage: u16,
     pub bus_type: BusType,
+    /// USB 接口号（Windows 可靠；Linux 取自 sysfs，取不到为 -1），仅作探测排序
+    pub interface: i32,
 }
 
 impl HidDev {
@@ -141,11 +157,24 @@ pub async fn collect(last: &[DeviceBattery]) -> ProbeOutcome {
                 let last = last.to_vec();
                 handles.push(tauri::async_runtime::spawn(collect_atk(interfaces, last)));
             }
-            registry::Plan::KnownVendor(label) => {
-                // 已知品牌但无解析器（如锁写固件的接收器）：不生成卡片。
-                // 用户要求只显示真实可读的无线设备——「协议未适配」的
-                // 接收器占位卡只会造成困惑（读不出任何数据）
-                let _ = label;
+            registry::Plan::Razer => {
+                let last = last.to_vec();
+                handles.push(tauri::async_runtime::spawn(collect_razer(interfaces, last)));
+            }
+            registry::Plan::SteelSeries => {
+                let last = last.to_vec();
+                handles.push(tauri::async_runtime::spawn(collect_steelseries(interfaces, last)));
+            }
+            registry::Plan::Corsair => {
+                let last = last.to_vec();
+                handles.push(tauri::async_runtime::spawn(collect_corsair(interfaces, last)));
+            }
+            registry::Plan::HyperX => {
+                let last = last.to_vec();
+                handles.push(tauri::async_runtime::spawn(collect_hyperx(interfaces, last)));
+            }
+            registry::Plan::EightBitDo => {
+                handles.push(tauri::async_runtime::spawn(collect_eightbitdo(interfaces)));
             }
             registry::Plan::Unknown => {
                 handles.push(tauri::async_runtime::spawn(collect_generic(interfaces)));
@@ -265,6 +294,101 @@ async fn collect_atk(interfaces: Vec<HidDev>, last: Vec<DeviceBattery>) -> Group
     out
 }
 
+/// Razer / SteelSeries / Corsair / HyperX 共用的调度骨架：专用解析器探测，
+/// 无应答（设备深睡 / 关机，接收器在场属正常状态）保留上次读数，
+/// 打开接口失败（多为 Linux udev 权限）提示一次。
+async fn collect_vendor_family(
+    interfaces: Vec<HidDev>,
+    last: Vec<DeviceBattery>,
+    timeout: Duration,
+    brand: &str,
+    probe: fn(&[HidDev]) -> Result<Option<DeviceBattery>, ProbeError>,
+    id_of: fn(&[HidDev]) -> String,
+) -> GroupResult {
+    let mut out = GroupResult::empty();
+    let id = id_of(&interfaces);
+    let label = interfaces[0].display_name(brand);
+    let result = timeout_blocking(timeout, {
+        let interfaces = interfaces.clone();
+        move || probe(&interfaces)
+    })
+    .await;
+    let io_error = matches!(result, Ok(Err(ProbeError::Io(_))));
+    match result {
+        Ok(Ok(Some(device))) => out.devices.push(device),
+        // 深睡保留最后读数（与 ATK 一致）；整体超时不提示——接收器在场而
+        // 外设睡眠是常态，不是故障
+        _ => {
+            if let Some(prev) = last.iter().find(|d| d.id == id && d.level.is_some()) {
+                out.devices.push(prev.clone());
+            }
+        }
+    }
+    // 打开接口失败（多为 Linux udev 权限）：提示一次
+    if io_error {
+        out.failures.push((
+            id,
+            format!("{label}（无法打开 HID 接口，Linux 下请检查 udev 权限）"),
+        ));
+    }
+    out
+}
+
+async fn collect_razer(interfaces: Vec<HidDev>, last: Vec<DeviceBattery>) -> GroupResult {
+    collect_vendor_family(interfaces, last, RAZER_TIMEOUT, "Razer", razer::probe, razer::device_id)
+        .await
+}
+
+async fn collect_steelseries(interfaces: Vec<HidDev>, last: Vec<DeviceBattery>) -> GroupResult {
+    collect_vendor_family(
+        interfaces,
+        last,
+        STEELSERIES_TIMEOUT,
+        "SteelSeries",
+        steelseries::probe,
+        steelseries::device_id,
+    )
+    .await
+}
+
+async fn collect_corsair(interfaces: Vec<HidDev>, last: Vec<DeviceBattery>) -> GroupResult {
+    collect_vendor_family(
+        interfaces,
+        last,
+        CORSAIR_TIMEOUT,
+        "Corsair",
+        corsair::probe,
+        corsair::device_id,
+    )
+    .await
+}
+
+async fn collect_hyperx(interfaces: Vec<HidDev>, last: Vec<DeviceBattery>) -> GroupResult {
+    collect_vendor_family(
+        interfaces,
+        last,
+        HYPERX_TIMEOUT,
+        "HyperX",
+        hyperx::probe,
+        hyperx::device_id,
+    )
+    .await
+}
+
+async fn collect_eightbitdo(interfaces: Vec<HidDev>) -> GroupResult {
+    // 只读监听，无应答即无卡片（手柄未被 Steam 切换时本就没有电量可读）
+    let mut out = GroupResult::empty();
+    let result = timeout_blocking(PROBE_TIMEOUT, {
+        let interfaces = interfaces.clone();
+        move || eightbitdo::probe(&interfaces)
+    })
+    .await;
+    if let Ok(Ok(Some(device))) = result {
+        out.devices.push(device);
+    }
+    out
+}
+
 async fn collect_generic(interfaces: Vec<HidDev>) -> GroupResult {
     let mut out = GroupResult::empty();
     let first = &interfaces[0];
@@ -348,6 +472,7 @@ fn enumerate() -> Vec<HidDev> {
             usage_page: d.usage_page(),
             usage: d.usage(),
             bus_type: d.bus_type(),
+            interface: d.interface_number(),
         })
         .collect()
 }

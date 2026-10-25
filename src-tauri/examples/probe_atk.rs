@@ -35,6 +35,7 @@ fn main() {
             usage_page: d.usage_page(),
             usage: d.usage(),
             bus_type: d.bus_type(),
+            interface: d.interface_number(),
         };
         println!(
             "found vendor interface {:04x}:{:04x} usage_page=0x{:04x} usage={} product='{}'",
