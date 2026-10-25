@@ -1,0 +1,44 @@
+[package]
+name = "wick"
+version = "0.2.0"
+description = "Wick — 跨平台无线设备电量监控（蓝牙 / 星闪 / 2.4G 接收器）"
+authors = ["Wick"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "wick_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time", "rt", "macros"] }
+anyhow = "1"
+thiserror = "2"
+hidapi = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "4", features = ["tokio"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+  "Devices_Bluetooth",
+  "Win32_Devices_Bluetooth",
+  "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Devices_Properties",
+  "Win32_Foundation",
+  "Win32_System_WinRT",
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
