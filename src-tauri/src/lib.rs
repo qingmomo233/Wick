@@ -60,6 +60,12 @@ pub fn run() {
                     let _ = win.set_always_on_top(true);
                 }
             }
+            // 恢复上次记住的窗口尺寸（逻辑像素，跨 DPI 缩放不跑偏）
+            if let (Some(w), Some(h)) = (loaded.window_width, loaded.window_height) {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_size(tauri::LogicalSize::new(w as f64, h as f64));
+                }
+            }
             // 加载「已添加设备」库：检测到过的设备重启后依然保留
             let store = known::load(app.handle());
             // 播种展示列表：打开即见上次的设备（按保存的顺序），

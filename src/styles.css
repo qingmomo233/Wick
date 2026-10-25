@@ -99,10 +99,6 @@ body {
   letter-spacing: 0.5px;
 }
 
-.brand-sub {
-  font-size: 12px;
-  color: var(--text-3);
-}
 
 .win-controls {
   display: flex;

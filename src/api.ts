@@ -28,6 +28,25 @@ export async function setWindowAlwaysOnTop(top: boolean): Promise<void> {
   await getCurrentWindow().setAlwaysOnTop(top);
 }
 
+/** 顶栏手动拖拽（替代 data-tauri-drag-region：后者自带双击最大化）。 */
+export async function startWindowDrag(): Promise<void> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  await getCurrentWindow().startDragging();
+}
+
+/** 监听窗口尺寸变化（物理像素），返回取消函数。 */
+export async function onWindowResized(cb: (w: number, h: number) => void): Promise<() => void> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  const un = await getCurrentWindow().onResized((e) => cb(e.payload.width, e.payload.height));
+  return un;
+}
+
+/** 窗口是否最大化（最大化时不记录尺寸）。 */
+export async function isWindowMaximized(): Promise<boolean> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  return getCurrentWindow().isMaximized();
+}
+
 export async function onDevicesUpdated(cb: (devices: DeviceBattery[]) => void): Promise<() => void> {
   const { listen } = await import('@tauri-apps/api/event');
   const un = await listen<DeviceBattery[]>('devices-updated', (e) => cb(e.payload));

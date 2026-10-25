@@ -38,6 +38,9 @@ export interface AppSettings {
   poll_interval_secs: number;
   /** 窗口置顶 */
   always_on_top: boolean;
+  /** 记住的窗口尺寸（逻辑像素），null = 默认 */
+  window_width: number | null;
+  window_height: number | null;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -46,4 +49,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   bg_opacity: 1.0,
   poll_interval_secs: 5,
   always_on_top: false,
+  window_width: null,
+  window_height: null,
 };

@@ -17,6 +17,11 @@ pub struct AppSettings {
     pub poll_interval_secs: u32,
     #[serde(default)]
     pub always_on_top: bool,
+    /// 记住的窗口尺寸（逻辑像素），None = 首次启动用默认值
+    #[serde(default)]
+    pub window_width: Option<u32>,
+    #[serde(default)]
+    pub window_height: Option<u32>,
 }
 
 fn default_close_action() -> String {
@@ -35,6 +40,8 @@ impl Default for AppSettings {
             bg_opacity: 1.0,
             poll_interval_secs: 5,
             always_on_top: false,
+            window_width: None,
+            window_height: None,
         }
     }
 }
@@ -52,6 +59,9 @@ impl AppSettings {
             bg_opacity: self.bg_opacity.clamp(0.2, 1.0),
             poll_interval_secs: self.poll_interval_secs.clamp(2, 60),
             always_on_top: self.always_on_top,
+            // 不小于窗口最小尺寸（tauri.conf.json 的 minWidth/minHeight）
+            window_width: self.window_width.map(|w| w.max(360)),
+            window_height: self.window_height.map(|h| h.max(480)),
         }
     }
 }

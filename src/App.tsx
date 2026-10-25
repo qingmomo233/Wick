@@ -10,6 +10,9 @@ import {
   saveSettings,
   onDevicesUpdated,
   onProbeFailed,
+  onWindowResized,
+  isWindowMaximized,
+  startWindowDrag,
   minimizeWindow,
   closeApp,
   fetchSettings,
@@ -93,6 +96,42 @@ export default function App() {
     const clamped = Math.min(1, Math.max(0.2, settings.bg_opacity || 1));
     document.documentElement.style.setProperty('--bg-opacity', String(clamped));
   }, [settings.bg_opacity]);
+
+  // 记住窗口尺寸：调整结束后（800ms 防抖）持久化，下次启动由后端恢复。
+  // 直接从后端取最新设置合并，避免与设置面板的保存互相覆盖
+  useEffect(() => {
+    let timer: number | undefined;
+    let disposed = false;
+    let un: (() => void) | null = null;
+    void onWindowResized((pw, ph) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void (async () => {
+          if (await isWindowMaximized().catch(() => false)) return;
+          const scale = window.devicePixelRatio || 1;
+          const w = Math.max(360, Math.round(pw / scale));
+          const h = Math.max(480, Math.round(ph / scale));
+          try {
+            const s = await fetchSettings();
+            if (s.window_width === w && s.window_height === h) return;
+            await saveSettings({ ...s, window_width: w, window_height: h });
+          } catch {
+            /* 忽略：下次调整再存 */
+          }
+        })();
+      }, 800);
+    })
+      .then((u) => {
+        if (disposed) u();
+        else un = u;
+      })
+      .catch(() => null);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      un?.();
+    };
+  }, []);
 
   const filtered = useMemo(
     () => devices.filter((d) => matchesFilter(d, filter)),
@@ -201,13 +240,19 @@ export default function App() {
     }
   };
 
+  // 顶栏拖拽：仅左键单击拖动；双击不动作（需求：双击不允许最大化）
+  const onTitlebarMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || e.detail !== 1) return;
+    if ((e.target as HTMLElement).closest('.win-controls')) return;
+    void startWindowDrag();
+  };
+
   return (
     <div className="app">
-      <header className="titlebar" data-tauri-drag-region>
-        <div className="brand" data-tauri-drag-region>
+      <header className="titlebar" onMouseDown={onTitlebarMouseDown}>
+        <div className="brand">
           <span className="brand-dot" />
           <span className="brand-name">Wick</span>
-          <span className="brand-sub">无线设备电量</span>
         </div>
         <div className="win-controls">
           <button
